@@ -1,60 +1,73 @@
-const { Book, User } = require("../models");
+const { signToken } = require("../utils/auth");
+const { User } = require("../models");
+const { AuthenticationError } = require("apollo-server-express");
+// const { populate } = require("../models/User");
 
 const resolvers = {
   Query: {
     me: async (parent, args, context) => {
       if (context.user) {
-        return await User.findOne({ _id: context.user._id });
+        return await User.findOne({ _id: context.user._id }).
+        populate("savedBooks");
       }
       throw new AuthenticationError("Must be logged in");
     },
   },
 
-  Mutations: {
-    addUser: async (parent, { user, email, password }) => {
-      const user = await User.create({ user, email, password });
-      const token = signToken(user);
-      return { token, user };
-    },
-    saveBook: async (parent, { bookData }, context) => {
-      if (context.user) {
-        const userbook = await User.findOneAndUpdate(
-          { _id: context.user._id },
-          {
-            $addToSet: { savedBooks: bookData },
-          },
-          {
-            new: true,
-          }
-        );
-        return userbook;
-      }
-      throw new AuthenticationError("Must be logged In...");
-    },
-    deleteBook: async (parent, { bookId }, context) => {
-      if (context.user) {
-        return await User.findOneAndUpdate(
-          { _id: context.user._id },
-          { $pull: { savedBooks: { bookId } } },
-          { new: true }
-        );
-      }
-    },
+  Mutation: {
     login: async (parent, { email, password }) => {
       const user = await User.findOne({ email });
 
       if (!user) {
-        throw new AuthenticationError("No user with this email found!");
+        throw new AuthenticationError("No profile with this email found!");
       }
 
-      const correctPassword = await user.isCorrectPassword(password);
+      const correctPw = await user.isCorrectPassword(password);
 
-      if (!correctPassword) {
+      if (!correctPw) {
         throw new AuthenticationError("Incorrect password!");
       }
 
       const token = signToken(user);
       return { token, user };
     },
+
+    addUser: async (parent, { username, email, password }) => {
+      const user = await User.create({ username, email, password });
+      const token = signToken(user);
+
+      return { token, user };
+    },
+
+    saveBook: async (parent, { bookData }, context) => {
+      // If context has a `user` property, that means the user executing this mutation has a valid JWT and is logged in
+      if (context.user) {
+        return User.findOneAndUpdate(
+          { _id: context.user._id },
+          {
+            $push: { savedBooks: bookData },
+          },
+          {
+            new: true,
+            runValidators: true,
+          }
+        );
+      }
+      // If user attempts to execute this mutation and isn't logged in, throw an error
+      throw new AuthenticationError("You need to be logged in!");
+    },
+
+    removeBook: async (parent, { bookId }, context) => {
+      if (context.user) {
+        return User.findOneAndUpdate(
+          { _id: context.user._id },
+          { $pull: { savedBooks: { bookId: bookId } } },
+          { new: true }
+        );
+      }
+      throw new AuthenticationError("You need to be logged in!");
+    },
   },
 };
+
+module.exports = resolvers;
